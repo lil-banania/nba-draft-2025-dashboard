@@ -42,4 +42,4 @@ Un dashboard interactif d'analyse de la draft NBA 2025 avec intelligence artific
 - Comparaisons historiques accurates
 
 ---
-**Créé par [Votre Nom]** | [LinkedIn](https://linkedin.com/in/votre-profil) | [Portfolio](https://votre-portfolio.com)
+**Créé par Kevin Begranger aka KB8 | [LinkedIn](https://linkedin.com/in/votre-profil
