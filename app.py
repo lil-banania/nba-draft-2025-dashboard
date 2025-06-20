@@ -2850,8 +2850,8 @@ def display_footer():
 if __name__ == "__main__":
     main()
 
-        st.error(f"❌ Erreur générale: {e}")
-        st.info("Essayez de recharger la page ou vérifiez vos données")
+    st.error(f"❌ Erreur générale: {e}")
+    st.info("Essayez de recharger la page ou vérifiez vos données")
 
 if __name__ == "__main__":
     main()
