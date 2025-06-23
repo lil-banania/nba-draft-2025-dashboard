@@ -121,6 +121,36 @@ def format_height(height_decimal: float) -> str:
     inches = int((height_decimal - feet) * 12)
     return f"{feet}'{inches}\""
 
+def get_player_photo_url(player_name: str, college: str = "") -> str:
+    """Get player photo URL from ESPN or fallback sources"""
+    # ESPN College Basketball API (pour les prospects actuels)
+    base_espn_url = "https://a.espncdn.com/combiner/i?img=/i/headshots/mens-college-basketball/players/full/"
+    
+    # Mapping manuel pour les top prospects (à maintenir)
+    photo_mapping = {
+        'Cooper Flagg': 'https://a.espncdn.com/combiner/i?img=/i/headshots/mens-college-basketball/players/full/5156710.png',
+        'Ace Bailey': 'https://a.espncdn.com/combiner/i?img=/i/headshots/mens-college-basketball/players/full/5156711.png',
+        'Dylan Harper': 'https://a.espncdn.com/combiner/i?img=/i/headshots/mens-college-basketball/players/full/5156712.png',
+        'VJ Edgecombe': 'https://a.espncdn.com/combiner/i?img=/i/headshots/mens-college-basketball/players/full/5156713.png',
+    }
+    
+    # Retourne la photo si disponible, sinon placeholder
+    if player_name in photo_mapping:
+        return photo_mapping[player_name]
+    
+    # Fallback : avatar générique basé sur l'initiale
+    initials = ''.join([name[0] for name in player_name.split()[:2]]).upper()
+    return f"https://ui-avatars.com/api/?name={initials}&size=120&background=FF6B35&color=fff&font-size=0.4"
+
+def validate_image_url(url: str) -> str:
+    """Validate image URL and return fallback if needed"""
+    try:
+        # En production, tu peux faire un HEAD request pour vérifier
+        return url
+    except:
+        # Fallback vers avatar générique
+        return "https://ui-avatars.com/api/?name=NBA&size=120&background=FF6B35&color=fff"
+
 # ==================== Constantes ====================
 NBA_TEAMS_ANALYSIS = {
     # Atlantic Division
@@ -510,43 +540,226 @@ def create_leaders_section(df: pd.DataFrame):
         st.error(f"Error in leaders section: {e}")
 
 def create_enhanced_search_with_stats(df: pd.DataFrame):
-    """Enhanced search with proper stat display"""
-    st.markdown("## 🔍 Advanced Search & Player Database")
+    """Enhanced search with simplified interface and multi-select positions"""
+    st.markdown("## 🔍 Player Database")
     
-    search_term = st.text_input("🔍 Search prospects:", placeholder="Enter name, college, or position")
+    # Barre de recherche principale
+    search_term = st.text_input(
+        "🔍 Search prospects:", 
+        placeholder="Search by name, college, or keywords...",
+        help="Search across player names, colleges, and archetypes"
+    )
     
-    col1, col2, col3 = st.columns(3)
+    # Filtres en ligne
+    col1, col2, col3, col4 = st.columns([3, 2, 2, 2])
     
     with col1:
-        min_ppg = st.slider("Min PPG", 0, 30, 0)
+        # Multi-select positions avec boutons
+        st.markdown("**Positions:**")
+        positions = ['PG', 'SG', 'SF', 'PF', 'C']
+        
+        # Boutons de sélection rapide
+        quick_col1, quick_col2, quick_col3 = st.columns(3)
+        with quick_col1:
+            if st.button("All Positions", key="all_pos"):
+                st.session_state.selected_positions = positions
+        with quick_col2:
+            if st.button("Guards", key="guards"):
+                st.session_state.selected_positions = ['PG', 'SG']
+        with quick_col3:
+            if st.button("Frontcourt", key="frontcourt"):
+                st.session_state.selected_positions = ['SF', 'PF', 'C']
+        
+        # Multi-select avec état persistant
+        if 'selected_positions' not in st.session_state:
+            st.session_state.selected_positions = positions
+        
+        selected_positions = st.multiselect(
+            "Select positions:",
+            positions,
+            default=st.session_state.selected_positions,
+            key="position_multiselect"
+        )
+        st.session_state.selected_positions = selected_positions
+    
     with col2:
-        min_3pt = st.slider("Min 3P%", 0.0, 0.6, 0.0, 0.05)
+        min_ppg = st.slider("Min PPG", 0, 30, 0, key="ppg_slider")
+    
     with col3:
-        archetype_filter = st.selectbox("Archetype", ['All'] + list(df['archetype'].unique()) if 'archetype' in df.columns else ['All'])
+        min_3pt = st.slider("Min 3P%", 0.0, 0.6, 0.0, 0.05, key="3pt_slider")
+    
+    with col4:
+        if 'archetype' in df.columns:
+            archetypes = ['All'] + sorted(list(df['archetype'].unique()))
+            archetype_filter = st.selectbox("Archetype", archetypes, key="archetype_select")
+        else:
+            archetype_filter = 'All'
     
     # Apply filters
     filtered_df = df.copy()
     
+    # Search filter
     if search_term:
         mask = (
             filtered_df['name'].str.contains(search_term, case=False, na=False) |
             filtered_df['college'].str.contains(search_term, case=False, na=False) |
             filtered_df['position'].str.contains(search_term, case=False, na=False)
         )
+        if 'archetype' in filtered_df.columns:
+            mask |= filtered_df['archetype'].str.contains(search_term, case=False, na=False)
         filtered_df = filtered_df[mask]
     
+    # Position filter
+    if selected_positions:
+        filtered_df = filtered_df[filtered_df['position'].isin(selected_positions)]
+    
+    # Stats filters
     filtered_df = filtered_df[filtered_df['ppg'] >= min_ppg]
     if 'three_pt_pct' in filtered_df.columns:
         filtered_df = filtered_df[filtered_df['three_pt_pct'] >= min_3pt]
     
+    # Archetype filter
     if archetype_filter != 'All' and 'archetype' in filtered_df.columns:
         filtered_df = filtered_df[filtered_df['archetype'] == archetype_filter]
     
-    st.success(f"Found {len(filtered_df)} prospects matching your criteria")
+    # Results summary
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        st.success(f"📊 {len(filtered_df)} prospects found")
+    with col2:
+        if len(filtered_df) > 0:
+            # Sort options
+            sort_by = st.selectbox(
+                "Sort by:",
+                ["Draft Rank", "PPG", "Potential", "Name"],
+                key="sort_select"
+            )
     
-    # Display results with proper formatting
-    for _, prospect in filtered_df.head(20).iterrows():
-        display_player_card(prospect)
+    # Apply sorting
+    if len(filtered_df) > 0:
+        if sort_by == "Draft Rank":
+            filtered_df = filtered_df.sort_values('final_rank')
+        elif sort_by == "PPG":
+            filtered_df = filtered_df.sort_values('ppg', ascending=False)
+        elif sort_by == "Potential":
+            filtered_df = filtered_df.sort_values('final_gen_probability', ascending=False)
+        elif sort_by == "Name":
+            filtered_df = filtered_df.sort_values('name')
+    
+    # Display results in clean table format
+    display_search_results_table(filtered_df.head(50))  # Limite à 50 résultats
+
+def display_search_results_table(df: pd.DataFrame):
+    """Display search results in a clean table format"""
+    if len(df) == 0:
+        st.info("🔍 No prospects match your search criteria. Try adjusting your filters.")
+        return
+    
+    # Prepare display columns
+    display_cols = ['final_rank', 'name', 'position', 'college', 'ppg', 'rpg', 'apg', 
+                   'three_pt_pct', 'scout_grade', 'final_gen_probability']
+    
+    # Check which columns exist
+    available_cols = [col for col in display_cols if col in df.columns]
+    table_df = df[available_cols].copy()
+    
+    # Format columns
+    if 'three_pt_pct' in table_df.columns:
+        table_df['three_pt_pct'] = table_df['three_pt_pct'].apply(lambda x: f"{x:.1%}")
+    if 'final_gen_probability' in table_df.columns:
+        table_df['final_gen_probability'] = table_df['final_gen_probability'].apply(lambda x: f"{x:.1%}")
+    if 'ppg' in table_df.columns:
+        table_df['ppg'] = table_df['ppg'].round(1)
+    if 'rpg' in table_df.columns:
+        table_df['rpg'] = table_df['rpg'].round(1)
+    if 'apg' in table_df.columns:
+        table_df['apg'] = table_df['apg'].round(1)
+    
+    # Rename columns for display
+    column_mapping = {
+        'final_rank': 'Rank',
+        'name': 'Name',
+        'position': 'Pos',
+        'college': 'College',
+        'ppg': 'PPG',
+        'rpg': 'RPG',
+        'apg': 'APG',
+        'three_pt_pct': '3P%',
+        'scout_grade': 'Grade',
+        'final_gen_probability': 'Potential'
+    }
+    
+    # Apply renaming only for columns that exist
+    rename_dict = {old: new for old, new in column_mapping.items() if old in table_df.columns}
+    table_df = table_df.rename(columns=rename_dict)
+    
+    # Display with enhanced styling
+    st.dataframe(
+        table_df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Rank": st.column_config.NumberColumn("Rank", format="%d"),
+            "PPG": st.column_config.NumberColumn("PPG", format="%.1f"),
+            "RPG": st.column_config.NumberColumn("RPG", format="%.1f"),
+            "APG": st.column_config.NumberColumn("APG", format="%.1f"),
+            "Grade": st.column_config.TextColumn("Grade"),
+            "Potential": st.column_config.TextColumn("Potential"),
+            "3P%": st.column_config.TextColumn("3P%"),
+        }
+    )
+    
+    # Quick actions
+    if len(df) > 0:
+        st.markdown("### 🎯 Quick Actions")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("📊 Compare Top 3", key="compare_top3"):
+                st.info("Comparison feature - select specific players to compare")
+        
+        with col2:
+            if st.button("📈 Show Stats Distribution", key="show_distribution"):
+                show_quick_stats_viz(df)
+        
+        with col3:
+            if st.button("💾 Export Results", key="export_results"):
+                csv = df.to_csv(index=False)
+                st.download_button(
+                    label="Download CSV",
+                    data=csv,
+                    file_name=f"nba_draft_search_results.csv",
+                    mime="text/csv"
+                )
+
+def show_quick_stats_viz(df: pd.DataFrame):
+    """Show quick stats visualization for search results"""
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # PPG distribution
+        fig_ppg = px.histogram(
+            df.head(20), 
+            x='ppg', 
+            title="PPG Distribution (Top 20 Results)",
+            nbins=10,
+            color_discrete_sequence=['#FF6B35']
+        )
+        fig_ppg.update_layout(height=300)
+        st.plotly_chart(fig_ppg, use_container_width=True)
+    
+    with col2:
+        # Position breakdown
+        if 'position' in df.columns:
+            pos_counts = df.head(20)['position'].value_counts()
+            fig_pos = px.pie(
+                values=pos_counts.values,
+                names=pos_counts.index,
+                title="Position Breakdown (Top 20 Results)",
+                color_discrete_sequence=px.colors.qualitative.Set3
+            )
+            fig_pos.update_layout(height=300)
+            st.plotly_chart(fig_pos, use_container_width=True)
 
 def display_player_card(player: pd.Series):
     """Display a properly formatted player card using metrics instead of HTML grid"""
@@ -596,6 +809,56 @@ def display_player_card(player: pd.Series):
                 </div>
             </div>
         </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Use Streamlit metrics for stats
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    
+    with col1:
+        st.metric("PPG", f"{ppg:.1f}")
+    with col2:
+        st.metric("RPG", f"{rpg:.1f}")
+    with col3:
+        st.metric("APG", f"{apg:.1f}")
+    with col4:
+        st.metric("FG%", f"{fg_pct:.1%}")
+    with col5:
+        st.metric("3P%", f"{three_pt_pct:.1%}")
+    with col6:
+        st.metric("TS%", f"{ts_pct:.1%}")
+    
+    # Physical attributes
+    st.markdown(f"""
+    <div style="text-align: center; padding: 1rem; background: #f8f9fa; border-radius: 10px; margin-top: 1rem;">
+        <span style="margin: 0 1rem;"><strong>Age:</strong> {age:.0f}</span>
+        <span style="margin: 0 1rem;"><strong>Height:</strong> {height}</span>
+        <span style="margin: 0 1rem;"><strong>Weight:</strong> {weight:.0f} lbs</span>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Use Streamlit metrics for stats instead of HTML grid
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    
+    with col1:
+        st.metric("PPG", f"{ppg:.1f}")
+    with col2:
+        st.metric("RPG", f"{rpg:.1f}")
+    with col3:
+        st.metric("APG", f"{apg:.1f}")
+    with col4:
+        st.metric("FG%", f"{fg_pct:.1%}")
+    with col5:
+        st.metric("3P%", f"{three_pt_pct:.1%}")
+    with col6:
+        st.metric("TS%", f"{ts_pct:.1%}")
+    
+    # Physical attributes
+    st.markdown(f"""
+    <div style="text-align: center; padding: 1rem; background: #f8f9fa; border-radius: 10px; margin-top: 1rem;">
+        <span style="margin: 0 1rem;"><strong>Age:</strong> {age:.0f}</span>
+        <span style="margin: 0 1rem;"><strong>Height:</strong> {height}</span>
+        <span style="margin: 0 1rem;"><strong>Weight:</strong> {weight:.0f} lbs</span>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1389,9 +1652,9 @@ def create_detailed_comparison_table(p1: pd.Series, p2: pd.Series,
         st.dataframe(physical_stats, use_container_width=True, hide_index=True)
 
 def create_draft_prediction(df: pd.DataFrame):
-    """Create full draft prediction"""
+    """Create full draft prediction with modern card design"""
     st.markdown("## 📋 Complete Draft Prediction 2025")
-    st.caption("Full 60-pick draft simulation based on AI analysis")
+    st.caption("Full 60-pick draft simulation with modern card design")
     
     # Add variance to make it realistic
     draft_order = df.copy()
@@ -1414,19 +1677,24 @@ def create_draft_prediction(df: pd.DataFrame):
     else:
         display_picks = 60
     
-    # Display picks
+    # Display picks with new modern design
     for i in range(min(display_picks, len(draft_order))):
-        display_draft_pick(draft_order.iloc[i], i + 1)
+        display_draft_pick_clean(draft_order.iloc[i], i + 1)
+    
+    # Draft summary
+    display_draft_summary(draft_order)
     
     # Draft summary
     display_draft_summary(draft_order)
 
-def display_draft_pick(pick: pd.Series, pick_num: int):
-    """Display individual draft pick"""
+def display_draft_pick_clean(pick: pd.Series, pick_num: int):
+    """Clean card design without complex HTML"""
+    
+    # Extract data safely
     name = safe_string(pick['name'])
     position = safe_string(pick['position'])
     college = safe_string(pick['college'])
-    archetype = safe_string(pick.get('archetype', 'N/A'))
+    archetype = safe_string(pick.get('archetype', 'Prospect'))
     
     ppg = safe_numeric(pick['ppg'])
     rpg = safe_numeric(pick['rpg'])
@@ -1435,71 +1703,81 @@ def display_draft_pick(pick: pd.Series, pick_num: int):
     grade = safe_string(pick['scout_grade'])
     prob = safe_numeric(pick.get('final_gen_probability', 0.5))
     
-    # Color scheme
-    if pick_num <= 5:
-        border_color = '#FFD700'
-        bg_color = '#FFF9E6'
-    elif pick_num <= 14:
-        border_color = '#FF6B35'
-        bg_color = '#FFF5F0'
-    elif pick_num <= 30:
-        border_color = '#4361EE'
-        bg_color = '#F0F4FF'
-    else:
-        border_color = '#6B7280'
-        bg_color = '#F9FAFB'
+    age = safe_numeric(pick.get('age', 0))
+    height = format_height(safe_numeric(pick.get('height', 0)))
+    weight = safe_numeric(pick.get('weight', 0))
     
-    st.markdown(f"""
-    <div style="background: {bg_color}; 
-                border: 2px solid {border_color}; 
-                border-left: 6px solid {border_color};
-                padding: 1.5rem; 
-                border-radius: 12px; 
-                margin: 1rem 0;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
-        <div style="display: flex; justify-content: space-between; align-items: start;">
-            <div style="flex: 1;">
-                <div style="display: flex; align-items: center; margin-bottom: 0.8rem;">
-                    <div style="background: {border_color}; color: white; 
-                                padding: 0.5rem 1rem; border-radius: 50%; 
-                                font-weight: bold; font-size: 1.1rem; margin-right: 1rem;">
-                        {pick_num}
-                    </div>
-                    <div>
-                        <h4 style="margin: 0; color: #333; font-size: 1.3rem;">{name}</h4>
-                        <div style="color: #666; font-size: 0.95rem; margin-top: 0.2rem;">
-                            {position} • {college} • {archetype}
-                        </div>
-                    </div>
-                </div>
-                
-                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 1rem;">
-                    <div style="text-align: center;">
-                        <div style="font-size: 1.3rem; font-weight: bold; color: {border_color};">{ppg:.1f}</div>
-                        <div style="font-size: 0.8rem; color: #666;">PPG</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div style="font-size: 1.3rem; font-weight: bold; color: {border_color};">{rpg:.1f}</div>
-                        <div style="font-size: 0.8rem; color: #666;">RPG</div>
-                    </div>
-                    <div style="text-align: center;">
-                        <div style="font-size: 1.3rem; font-weight: bold; color: {border_color};">{apg:.1f}</div>
-                        <div style="font-size: 0.8rem; color: #666;">APG</div>
-                    </div>
-                </div>
+    # Colors and tier
+    if pick_num <= 5:
+        tier_label = "👑 TOP 5"
+        color_class = "🟡"
+    elif pick_num <= 14:
+        tier_label = "🎰 LOTTERY"
+        color_class = "🟠"
+    elif pick_num <= 30:
+        tier_label = "🏀 1ST ROUND"
+        color_class = "🔵"
+    else:
+        tier_label = "⚡ 2ND ROUND"
+        color_class = "⚫"
+    
+    # Create the card using Streamlit components only
+    with st.container():
+        # Header row
+        col1, col2, col3 = st.columns([1, 3, 1])
+        
+        with col1:
+            st.markdown(f"""
+            <div style="text-align: center; padding: 1rem; background: #f8f9fa; border-radius: 50%; width: 80px; height: 80px; margin: 0 auto; display: flex; align-items: center; justify-content: center;">
+                <span style="font-size: 1.5rem; font-weight: bold;">#{pick_num}</span>
             </div>
+            """, unsafe_allow_html=True)
+            st.markdown(f"<div style='text-align: center; margin-top: 0.5rem; font-size: 0.8rem;'>{tier_label}</div>", unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown(f"### {name}")
+            st.markdown(f"**{position}** • {college}")
+            st.markdown(f"`{archetype}`")
             
-            <div style="text-align: right; margin-left: 1rem;">
-                <div style="background: {border_color}; color: white; 
-                            padding: 0.5rem 1rem; border-radius: 20px; 
-                            font-weight: bold; margin-bottom: 0.5rem;">
-                    {grade}
-                </div>
-                <div style="font-size: 0.9rem; color: #666;">{prob:.1%} potential</div>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+            # Grade and potential in same row
+            grade_col, pot_col = st.columns(2)
+            with grade_col:
+                st.markdown(f"**Grade:** `{grade}`")
+            with pot_col:
+                st.markdown(f"**Potential:** `{prob:.1%}`")
+        
+        with col3:
+            st.markdown("**Physical**")
+            st.markdown(f"Age: {age:.0f}")
+            st.markdown(f"Height: {height}")
+            st.markdown(f"Weight: {weight:.0f}")
+    
+    # Stats section
+    st.markdown("---")
+    st.markdown("**📊 College Stats**")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("PPG", f"{ppg:.1f}")
+    with col2:
+        st.metric("RPG", f"{rpg:.1f}")
+    with col3:
+        st.metric("APG", f"{apg:.1f}")
+    
+    # Additional stats if available
+    if 'three_pt_pct' in pick.index and pd.notna(pick['three_pt_pct']):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            three_pt = safe_numeric(pick.get('three_pt_pct', 0))
+            st.metric("3P%", f"{three_pt:.1%}")
+        with col2:
+            fg_pct = safe_numeric(pick.get('fg_pct', 0))
+            st.metric("FG%", f"{fg_pct:.1%}")
+        with col3:
+            ts_pct = safe_numeric(pick.get('ts_pct', 0))
+            st.metric("TS%", f"{ts_pct:.1%}")
+    
+    st.markdown("---")
 
 def display_draft_summary(draft_order: pd.DataFrame):
     """Display draft summary statistics"""
@@ -2847,11 +3125,5 @@ def display_footer():
     """, unsafe_allow_html=True)
 
 # ==================== Run Application ====================
-if __name__ == "__main__":
-    main()
-
-    st.error(f"❌ Erreur générale: {e}")
-    st.info("Essayez de recharger la page ou vérifiez vos données")
-
 if __name__ == "__main__":
     main()
